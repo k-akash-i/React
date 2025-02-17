@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepSeek Audio Interface</title>
+    <style>
+        :root {
+            --primary: #00ff9d;
+            --secondary: #6c5ce7;
+            --bg: #0a192f;
+            --glass: rgba(255, 255, 255, 0.05);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        body {
+            background: var(--bg);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            margin-top: 2rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+
+        .interface {
+            background: var(--glass);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 0 30px rgba(0, 255, 157, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .recorder {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .button {
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            border: none;
+            padding: 1rem 2rem;
+            color: white;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 255, 157, 0.3);
+        }
+
+        .status {
+            text-align: center;
+            margin: 1rem 0;
+            color: var(--primary);
+            font-size: 1.1rem;
+            height: 1.5rem;
+        }
+
+        .response-container {
+            margin-top: 2rem;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.5s ease;
+        }
+
+        .response-container.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .response-audio {
+            width: 100%;
+            margin-top: 1rem;
+        }
+
+        .error {
+            color: #ff4444;
+            text-align: center;
+            margin: 1rem 0;
+            padding: 1rem;
+            background: rgba(255, 68, 68, 0.1);
+            border-radius: 10px;
+            display: none;
+        }
+
+        .error.visible {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .interface {
+                padding: 1.5rem;
+            }
+
+            .button {
+                padding: 0.8rem 1.5rem;
+                font-size: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>DeepSeek Voice Interface</h1>
+            <p>Speak your prompt and receive AI responses in audio</p>
+        </div>
+
+        <div class="interface">
+            <div class="recorder">
+                <button class="button" id="recordButton">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v20M2 12h20"/>
+                    </svg>
+                    Start Recording
+                </button>
+                <div class="status" id="status">Ready to record</div>
+            </div>
+
+            <div class="error" id="error"></div>
+
+            <div class="response-container" id="responseContainer">
+                <audio class="response-audio" id="responseAudio" controls></audio>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const recordButton = document.getElementById('recordButton');
+        const status = document.getElementById('status');
+        const errorDiv = document.getElementById('error');
+        const responseContainer = document.getElementById('responseContainer');
+        const responseAudio = document.getElementById('responseAudio');
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        // Check for browser support
+        if (!navigator.mediaDevices || !window.SpeechRecognition) {
+            showError('This browser does not support all required features');
+        }
+
+        // Initialize speech recognition
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recordButton.addEventListener('click', toggleRecording);
+
+        async function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = processAudio;
+                
+                mediaRecorder.start();
+                isRecording = true;
+                recordButton.innerHTML = '⏹ Stop Recording';
+                status.textContent = 'Recording...';
+            } catch (err) {
+                showError('Microphone access denied');
+            }
+        }
+
+        function stopRecording() {
+            mediaRecorder.stop();
+            isRecording = false;
+            recordButton.innerHTML = '🎙 Start Recording';
+            status.textContent = 'Processing...';
+        }
+
+        async function processAudio() {
+            try {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const text = await speechToText(audioBlob);
+                const response = await getAIResponse(text);
+                const audioUrl = await textToSpeech(response);
+                
+                responseAudio.src = audioUrl;
+                responseContainer.classList.add('visible');
+                status.textContent = 'Response ready';
+                audioChunks = [];
+            } catch (err) {
+                showError(err.message);
+                status.textContent = 'Ready to record';
+            }
+        }
+
+        async function speechToText(audioBlob) {
+            return new Promise((resolve, reject) => {
+                recognition.onresult = event => {
+                    resolve(event.results[0][0].transcript);
+                };
+
+                recognition.onerror = event => {
+                    reject(new Error('Speech recognition failed'));
+                };
+
+                const audioURL = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioURL);
+                audio.onended = () => recognition.start();
+                audio.play();
+            });
+        }
+
+        async function getAIResponse(prompt) {
+            try {
+                // Replace with actual DeepSeek API call
+                const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer YOUR_API_KEY'
+                    },
+                    body: JSON.stringify({
+                        model: 'deepseek-chat',
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+
+                if (!response.ok) throw new Error('API request failed');
+                const data = await response.json();
+                return data.choices[0].message.content;
+            } catch (err) {
+                throw new Error('Failed to get AI response');
+            }
+        }
+
+        async function textToSpeech(text) {
+            return new Promise((resolve, reject) => {
+                const synth = window.speechSynthesis;
+                const utterance = new SpeechSynthesisUtterance(text);
+                
+                utterance.onend = () => {
+                    const audioURL = URL.createObjectURL(new Blob([text], { type: 'audio/wav' }));
+                    resolve(audioURL);
+                };
+
+                utterance.onerror = () => {
+                    reject(new Error('Speech synthesis failed'));
+                };
+
+                synth.speak(utterance);
+            });
+        }
+
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.classList.add('visible');
+            setTimeout(() => errorDiv.classList.remove('visible'), 5000);
+        }
+    </script>
+</body>
+</html>
